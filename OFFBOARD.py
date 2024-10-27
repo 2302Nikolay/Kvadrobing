@@ -3,11 +3,10 @@ from rclpy.node import Node
 from mavros_msgs.srv import SetMode, CommandBool
 from mavros_msgs.msg import State
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import Header
 
 class TestNode(Node):
     def __init__(self):
-        super().__init__('test_node')
+        super().__init__('offboard_node')
 
         # Создаем клиента для установки режима и армирования
         self.set_mode_client = self.create_client(SetMode, '/uav1/mavros/set_mode')
@@ -22,7 +21,8 @@ class TestNode(Node):
         # Текущее состояние дрона
         self.current_state = None
         self.pose = PoseStamped()  # Целевая позиция
-        self.pose.pose.position.z = 6.0  # Высота полета в режиме OFFBOARD
+        self.pose.pose.position.x = 0.0
+        self.pose.pose.position.y = 0.0 
 
         self.test_services()
 
