@@ -4,21 +4,25 @@ from mavros_msgs.srv import SetMode, CommandBool
 from mavros_msgs.msg import State
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Header
-import time
 
 class TestNode(Node):
     def __init__(self):
         super().__init__('test_node')
 
-        # Создаем клиента для установки режима
+        # Создаем клиента для установки режима и армирования
         self.set_mode_client = self.create_client(SetMode, '/uav1/mavros/set_mode')
         self.arming_client = self.create_client(CommandBool, '/uav1/mavros/cmd/arming')
 
-        # Подписываемся на топик состояния дрона (для проверки состояния)
+        # Подписываемся на топик состояния дрона
         self.state_sub = self.create_subscription(State, '/uav1/mavros/state', self.state_cb, 10)
+
+        # Издатель для локальной позиции
+        self.local_pos_pub = self.create_publisher(PoseStamped, '/uav1/mavros/setpoint_position/local', 10)
 
         # Текущее состояние дрона
         self.current_state = None
+        self.pose = PoseStamped()  # Целевая позиция
+        self.pose.pose.position.z = 6.0  # Высота полета в режиме OFFBOARD
 
         self.test_services()
 
@@ -26,10 +30,13 @@ class TestNode(Node):
         self.current_state = msg
 
     def test_services(self):
-        # Ждем, пока дрон не подключится
+        # Ждем подключения дрона
         while not self.current_state or not self.current_state.connected:
             self.get_logger().info('\x1b[33m Ожидание подключения дрона... \x1b[0m')
             rclpy.spin_once(self)
+
+        # Начинаем публикацию сетпоинтов на частоте 20 Гц
+        self.publish_setpoints()
 
         # Проверка доступности сервиса армирования
         if self.arming_client.wait_for_service(timeout_sec=5.0):
@@ -40,7 +47,7 @@ class TestNode(Node):
             if future.result() and future.result().success:
                 self.get_logger().info('\x1b[32m Дрон армирован \x1b[0m')
             else:
-                self.get_logger().error('\x1b[31m Ошибка армирования \1xb[0m')
+                self.get_logger().error('\x1b[31m Ошибка армирования \x1b[0m')
         else:
             self.get_logger().error('\x1b[31m Сервис армирования не доступен \x1b[0m')
 
@@ -55,16 +62,28 @@ class TestNode(Node):
             else:
                 self.get_logger().error('\x1b[31m Ошибка установки OFFBOARD режима \x1b[0m')
         else:
-            self.get_logger().error('\x1b[31m Сервис установки режим не доступен \x1b[0m')
+            self.get_logger().error('\x1b[31m Сервис установки режима не доступен \x1b[0m')
+
+    def publish_setpoints(self):
+        # Публикуем сетпоинты в течение нескольких секунд, чтобы MavROS принял OFFBOARD
+        self.get_logger().info('\x1b[33m  Публикация сетпоинта для режима OFFBOARD \x1b[0m ')
+        for _ in range(100):
+            self.local_pos_pub.publish(self.pose)
+            if (_ % 2) == 0: # анимация загрузки
+                print('\x1b[1;34m|\x1b[0m', end='', flush=True) # чтобы печаталось в одну строку
+            self.get_clock().sleep_for(rclpy.time.Duration(seconds=0.05))  # Публикация с частотой 20 Гц
+        print('') # для переноса строки
 
 def main(args=None):
     rclpy.init(args=args)
     node = TestNode()
-    rclpy.spin(node)
-
-    node.destroy_node()
-    rclpy.shutdown()
-
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
