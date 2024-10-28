@@ -35,7 +35,7 @@ class TestNode(Node):
             self.get_logger().info('\x1b[33m Ожидание подключения дрона... \x1b[0m')
             rclpy.spin_once(self)
 
-        # Начинаем публикацию сетпоинтов на частоте 20 Гц
+        # Начинаем публикацию сетпоинтов
         self.publish_setpoints()
 
         # Проверка доступности сервиса армирования
@@ -65,14 +65,9 @@ class TestNode(Node):
             self.get_logger().error('\x1b[31m Сервис установки режима не доступен \x1b[0m')
 
     def publish_setpoints(self):
-        # Публикуем сетпоинты в течение нескольких секунд, чтобы MavROS принял OFFBOARD
+        # Публикуем сетпоинты чтобы MavROS принял OFFBOARD
         self.get_logger().info('\x1b[33m  Публикация сетпоинта для режима OFFBOARD \x1b[0m ')
-        for _ in range(100):
-            self.local_pos_pub.publish(self.pose)
-            if (_ % 2) == 0: # анимация загрузки
-                print('\x1b[1;34m|\x1b[0m', end='', flush=True) # чтобы печаталось в одну строку
-            self.get_clock().sleep_for(rclpy.time.Duration(seconds=0.05))  # Публикация с частотой 20 Гц
-        print('') # для переноса строки
+        self.local_pos_pub.publish(self.pose)
 
 def main(args=None):
     rclpy.init(args=args)
