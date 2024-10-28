@@ -66,11 +66,11 @@ class TestNode(Node):
         pose.pose.position.z = 3.2
 
         # Поворачиваемся на 90 градусов (ТЕСТ)
-        orientation = self.yaw(90)
-        pose.pose.orientation.w = orientation['w']
-        pose.pose.orientation.z = orientation['z']
-        pose.pose.orientation.x = 0.0
-        pose.pose.orientation.y = 0.0
+        #orientation = self.yaw(90)
+        #pose.pose.orientation.w = orientation['w']
+        #pose.pose.orientation.z = orientation['z']
+        #pose.pose.orientation.x = 0.0
+        #pose.pose.orientation.y = 0.0
 
         # Публикуем целевую позицию несколько раз для взлета
         for _ in range(100):
@@ -139,7 +139,7 @@ class TestNode(Node):
         pose.header.stamp = self.get_clock().now().to_msg()
 
         # Пролет вперед
-        self.get_logger().info('\x1b[33m Пролет вперед на 2 метра...\x1b[0m')
+        self.get_logger().info(f'\x1b[33m Пролет вперед на {f_dist} метра...\x1b[0m')
         pose.pose.position.x += f_dist-0.05
         pose.pose.position.y = 0.0
         pose.pose.position.z = 3.2
@@ -156,14 +156,14 @@ class TestNode(Node):
 
     def lidar_cb(self, msg):
         # Извлекаем расстояния в разных направлениях (например, спереди, справа и слева)
-        front_distance = min(msg.ranges[158:202]) # Прямо перед дроном
-        left_distance = min(msg.ranges[68:112])  # Лидар смотрит влево
-        right_distance = min(msg.ranges[248:292])  # Лидар смотрит вправо
-        #back_distance = min(msg.ranges[0:22][338:360])  # Лидар смотрит назад
+        front_distance = min(msg.ranges[158:202])       # Прямо перед дроном
+        left_distance = min(msg.ranges[68:112])         # Лидар смотрит влево
+        right_distance = min(msg.ranges[248:292])       # Лидар смотрит вправо
+        #back_distance = min(msg.ranges[0:22][338:360]) # Лидар смотрит назад
         
         
         # Двигаемся прямо, пока впереди нет препятствий
-        if front_distance > 1.0 and front_distance != float('inf'):  # Если впереди нет препятствия ближе 0.7 метра
+        if front_distance > 0.2 and front_distance != float('inf'):  # Если впереди нет препятствия ближе 0.7 метра
             self.fly_forward(front_distance) # Лети вперёд до препятствия
         else:
             # Останавливаемся, если впереди препятствие
