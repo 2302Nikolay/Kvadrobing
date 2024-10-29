@@ -12,18 +12,18 @@ class TestNode(Node):
     def __init__(self):
         super().__init__('test_node')
 
+        self.QRData = 0 # переменная для записи считанного числа в QR
+
         self.lidar_data = {"strht": None, "left": None, "right": None}
         self.set_mode_client = self.create_client(SetMode, '/uav1/mavros/set_mode')
         
         # Инициализация кадрового счетчика и подписка на камеру
         self.frame_counter = 0
         self.bridge = CvBridge()
-        self.camera_sub = self.create_subscription(Image, '/uav1/camera', self.camera_callback, 200)
+        self.camera_sub = self.create_subscription(Image, '/uav1/camera', self.camera_callback, 60)
 
         # Инициализация издателя управления дроном
         self.cmd_vel_pub = self.create_publisher(TwistStamped, '/uav1/mavros/setpoint_velocity/cmd_vel', 10)
-
-        self.take_off()
 
         # Создание и запуск потока обработки кадров
         self.frame_queue = None
@@ -39,9 +39,7 @@ class TestNode(Node):
         cmd.header.stamp = self.get_clock().now().to_msg()
 
         # Публикуем целевую позицию для взлета
-        for _ in range(0,100):
-            self.cmd_vel_pub.publish(cmd)
-            self.get_clock().sleep_for(rclpy.time.Duration(seconds=0.05))
+        self.cmd_vel_pub.publish(cmd)
         self.get_logger().info('\x1b[33m Команда на взлет отправлена... \x1b[0m ')
 
     def camera_callback(self, image_msg):
@@ -64,11 +62,18 @@ class TestNode(Node):
                 continue
 
             frame = self.frame_queue
-            #self.frame_queue = None  # Очищаем очередь после захвата кадра
+            # self.frame_queue = None  # Очищаем очередь после захвата кадра
 
             # Создаем объект для распознавания QR-кода
             qr_detector = cv2.QRCodeDetector()
             data, vertices, _ = qr_detector.detectAndDecode(frame)
+
+            try:
+                QR = int(data)
+            except:
+                QR = 0
+            if (self.QRData != QR):
+                self.QRData = QR
 
             # Если QR-код распознан, рисуем рамку и управляем дроном
             if vertices is not None:
@@ -81,9 +86,10 @@ class TestNode(Node):
                 width = int(np.max(vertices[:, 0]) - np.min(vertices[:, 0]))
                 height = int(np.max(vertices[:, 1]) - np.min(vertices[:, 1]))
                 qr_area = width * height
+                self.get_logger().info(f'Площадь дрона {qr_area}')
 
                 # Условие, если дрон подлетел на нужное расстояние
-                stop_area = 20000  # подбираем экспериментально, чтобы настроить нужное расстояние
+                stop_area = 40000  # подбираем экспериментально, чтобы настроить нужное расстояние
                 if qr_area >= stop_area:
                     self.get_logger().info('Дрон останавливается...')
                     # управляем дроном, если QR-код достаточно велик (то есть близко)
@@ -92,7 +98,7 @@ class TestNode(Node):
                     stop_cmd.twist.linear.x = 0.0
                     stop_cmd.twist.linear.y = 0.0
                     stop_cmd.twist.linear.z = 0.0
-                    stop_cmd.twist.angular.z = 0.0
+                    stop_cmd.twist.angular.z = -0.3
                     self.cmd_vel_pub.publish(stop_cmd)
                     continue
 
@@ -111,10 +117,10 @@ class TestNode(Node):
         # Поворот и подъем в зависимости от смещения
         if abs(delta_x) > tolerance:
             cmd.twist.angular.z = -0.0005 * delta_x
-            self.get_logger().info(f'Потворот на {delta_x}')
+            self.get_logger().info(f'Рысканье на {delta_x}')
         if abs(delta_y) > tolerance:
             cmd.twist.linear.z = -0.0005 * delta_y
-            self.get_logger().info(f'Взлет на {delta_x}')
+            self.get_logger().info(f'Корректировка высоты на {delta_x}')
 
         # Если QR в центре, двигаемся вперед
         if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance:
