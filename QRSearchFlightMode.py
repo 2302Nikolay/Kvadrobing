@@ -35,7 +35,7 @@ class TestNode(Node):
         # Код для взлета
         self.get_logger().info('\x1b[33m Попытка взлета... \x1b[0m ')
         cmd = TwistStamped()
-        cmd.twist.linear.z = 0.5
+        cmd.twist.linear.z = 0.7
         cmd.header.stamp = self.get_clock().now().to_msg()
 
         # Публикуем целевую позицию для взлета
@@ -46,7 +46,7 @@ class TestNode(Node):
 
     def camera_callback(self, image_msg):
         # Счетчик кадров
-        self.frame_counter = (self.frame_counter + 1) % 3
+        self.frame_counter = (self.frame_counter + 1) % 3 # пропускаем 2 кадра из 3 для оптимизации
         if self.frame_counter != 0:
             return
 
@@ -57,14 +57,14 @@ class TestNode(Node):
         self.frame_queue = frame
 
     def process_frame_thread(self):
-        cv2.setUseOptimized(True)
         while True:
             # Проверяем наличие кадра для обработки
             if self.frame_queue is None:
+                self.get_logger().info('Нет кадров для обработки')
                 continue
 
             frame = self.frame_queue
-            self.frame_queue = None  # Очищаем очередь после захвата кадра
+            #self.frame_queue = None  # Очищаем очередь после захвата кадра
 
             # Создаем объект для распознавания QR-кода
             qr_detector = cv2.QRCodeDetector()
@@ -72,6 +72,7 @@ class TestNode(Node):
 
             # Если QR-код распознан, рисуем рамку и управляем дроном
             if vertices is not None:
+                self.get_logger().info(f'Обнаружен QR {data}')
                 vertices = vertices[0]
                 center_x = int(np.mean(vertices[:, 0]))
                 center_y = int(np.mean(vertices[:, 1]))
@@ -81,10 +82,11 @@ class TestNode(Node):
                 height = int(np.max(vertices[:, 1]) - np.min(vertices[:, 1]))
                 qr_area = width * height
 
-                # Условие остановки, если дрон подлетел на нужное расстояние
-                stop_area = 500  # Подберите экспериментально, чтобы настроить нужное расстояние
+                # Условие, если дрон подлетел на нужное расстояние
+                stop_area = 20000  # подбираем экспериментально, чтобы настроить нужное расстояние
                 if qr_area >= stop_area:
-                    # Останавливаем дрон, если QR-код достаточно велик (то есть близко)
+                    self.get_logger().info('Дрон останавливается...')
+                    # управляем дроном, если QR-код достаточно велик (то есть близко)
                     stop_cmd = TwistStamped()
                     stop_cmd.header.stamp = self.get_clock().now().to_msg()
                     stop_cmd.twist.linear.x = 0.0
@@ -98,6 +100,7 @@ class TestNode(Node):
                 self.control_drone(center_x, center_y, frame.shape[1] // 2, frame.shape[0] // 2)
 
     def control_drone(self, qr_x, qr_y, frame_center_x, frame_center_y):
+        self.get_logger().info('control_drone() call')
         delta_x = qr_x - frame_center_x
         delta_y = qr_y - frame_center_y
         tolerance = 50  # допустимое отклонение
@@ -108,13 +111,18 @@ class TestNode(Node):
         # Поворот и подъем в зависимости от смещения
         if abs(delta_x) > tolerance:
             cmd.twist.angular.z = -0.0005 * delta_x
+            self.get_logger().info(f'Потворот на {delta_x}')
         if abs(delta_y) > tolerance:
             cmd.twist.linear.z = -0.0005 * delta_y
+            self.get_logger().info(f'Взлет на {delta_x}')
 
         # Если QR в центре, двигаемся вперед
         if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance:
-            cmd.twist.linear.x = 0.5
+            cmd.twist.linear.x = 0.3
+            self.get_logger().info('Летит к QR')
+        
         self.cmd_vel_pub.publish(cmd)
+                
 
     def land(self):
         self.get_logger().info('\x1b[33m Посадка... \x1b[0m')
