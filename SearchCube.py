@@ -13,13 +13,14 @@ class TestNode(Node):
     def __init__(self):
         super().__init__('test_node')
 
-        self.target_altitude = 1.0  # Целевая высота зависания над фигурой (в метрах)
-        self.figure_area_threshold = 4000  # Площадь фигуры, при которой дрон останавливается (настраиваемый параметр)
+        self.target_altitude = 1.0  # Целевая высота зависания над фигурой
+        self.figure_area_threshold = 4000  # Площадь фигуры, при которой дрон останавливается
         
         # Инициализация сервисов и подписчиков
         self.set_mode_client = self.create_client(SetMode, '/uav1/mavros/set_mode')
         self.bridge = CvBridge()
         self.camera_sub = self.create_subscription(Image, '/uav1/camera_down', self.camera_callback, 10)
+        self.pose_sub = self.create_subscription(PoseStamped, '/uav1/mavros/local_position/pose', self.pose_callback, 10)
         self.cmd_vel_pub = self.create_publisher(TwistStamped, '/uav1/mavros/setpoint_velocity/cmd_vel', 10)
         self.local_pos_pub = self.create_publisher(PoseStamped, '/uav1/mavros/setpoint_position/local', 10)
 
@@ -28,6 +29,8 @@ class TestNode(Node):
         self.processing_thread = threading.Thread(target=self.process_frame_thread)
         self.processing_thread.daemon = True
         self.processing_thread.start()
+
+        self.drone_position = None  # Для хранения текущей позиции дрона
 
     def take_off(self):
         # Функция для взлета дрона
@@ -48,6 +51,10 @@ class TestNode(Node):
         # Обработка входящих изображений от камеры
         frame = self.bridge.imgmsg_to_cv2(image_msg, desired_encoding='bgr8')
         self.frame_queue = frame  # Отправляем кадр в очередь для обработки
+
+    def pose_callback(self, pose_msg):
+        # Обновление позиции дрона
+        self.drone_position = (pose_msg.pose.position.x, pose_msg.pose.position.y, pose_msg.pose.position.z)
 
     def process_frame_thread(self):
         while True:
@@ -73,6 +80,18 @@ class TestNode(Node):
                 # Если фигура еще не достигла нужного размера, корректируем траекторию
                 self.control_drone(figure_center, frame.shape[1] // 2, frame.shape[0] // 2)
 
+            if self.drone_position is not None:
+                x, y, z = self.drone_position
+                coords_text = f"Drone Position: X={x:.2f}, Y={y:.2f}, Z={z:.2f}"
+                cv2.putText(frame, coords_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+            else:
+                self.get_logger().warn("Drone position data not available yet.")
+
+
+            # Показываем обновленное изображение
+            cv2.imshow("Drone Camera Down", frame)
+            cv2.waitKey(1)
+
     def detect_figure(self, frame):
         # Обнаружение фигуры определенного цвета на изображении
         hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -94,13 +113,9 @@ class TestNode(Node):
                 # Рисуем контуры для визуализации
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 cv2.circle(frame, (center_x, center_y), 5, (255, 0, 0), -1)
-
-                cv2.imshow("Drone Camera Down", frame)
-                cv2.waitKey(1)
                 
                 return True, (center_x, center_y), area
             
-        
         return False, (0, 0), 0
 
     def control_drone(self, figure_center, frame_center_x, frame_center_y):
