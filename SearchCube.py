@@ -44,7 +44,7 @@ class TestNode(Node):
         # Функция для взлета дрона
         self.get_logger().info('Попытка взлета...')
         pose = PoseStamped()
-        pose.pose.position.z = 2.0  # Набор высоты
+        pose.pose.position.z = 4.0  # Набор высоты
         pose.pose.position.x = 0.0
         pose.pose.position.y = 0.0
         pose.header.stamp = self.get_clock().now().to_msg()
@@ -54,6 +54,18 @@ class TestNode(Node):
             self.local_pos_pub.publish(pose)
             self.get_clock().sleep_for(rclpy.time.Duration(seconds=0.05))
         self.get_logger().info('Команда на взлет отправлена...')
+
+        
+        cmd = TwistStamped()
+        cmd.header.stamp = self.get_clock().now().to_msg()
+        if self.searched_cube == False:
+            cmd.twist.linear.y = 0.5
+            self.get_logger().info("Режим блуждание")
+        else:
+            self.get_logger().info("НЕ режим блуждания...")
+            cmd.twist.linear.y = 0.0
+        self.cmd_vel_pub.publish(cmd)
+
 
     def camera_callback(self, image_msg):
         # Обработка входящих изображений от камеры
@@ -82,10 +94,10 @@ class TestNode(Node):
                 self.get_logger().info(f'Площадь фигуры: {figure_area}')
 
                 # Если фигура достаточно велика (дрон достаточно близко), он останавливается
-                if figure_area >= self.figure_area_threshold:
-                    self.get_logger().info('Дрон останавливается над фигурой')
-                    self.hover_over_figure()
-                    continue
+                #if figure_area >= self.figure_area_threshold:
+                    #self.get_logger().info('Дрон останавливается над фигурой')
+                    #self.hover_over_figure()
+                    #continue
 
                 # Если фигура еще не достигла нужного размера, корректируем траекторию
                 self.control_drone(figure_center, frame.shape[1] // 2, frame.shape[0] // 2)
@@ -129,52 +141,38 @@ class TestNode(Node):
         return False, (0, 0), 0
 
     def control_drone(self, figure_center, frame_center_x, frame_center_y):
-        if self.searched_cube == True:
-            # Функция для управления дроном в направлении центра фигуры
-            self.get_logger().info('Корректировка положения дрона...')
-            delta_x = figure_center[0] - frame_center_x
-            delta_y = figure_center[1] - frame_center_y
-            tolerance = 50  # Допустимое отклонение для центрирования
+        # Функция для управления дроном в направлении центра фигуры
+        self.get_logger().info('Корректировка положения дрона...')
+        delta_x = figure_center[0] - frame_center_x
+        delta_y = figure_center[1] - frame_center_y
+        tolerance = 50  # Допустимое отклонение для центрирования
 
-            cmd = TwistStamped()
-            cmd.header.stamp = self.get_clock().now().to_msg()
-            
-            x, y, z = self.drone_position
+        cmd = TwistStamped()
+        cmd.header.stamp = self.get_clock().now().to_msg()
+        
+        x, y, z = self.drone_position
 
-            if z > 2:
-                cmd.twist.linear.z = -0.1
-                self.get_logger().info(f"Корректировка дрона вниз... {z}")
-            elif z < 2:
-                cmd.twist.linear.z = 0.1
-                self.get_logger().info(f"Корректировка дрона вверх... {z}")
+        if z > 4.0:
+            cmd.twist.linear.z = -0.1
+            self.get_logger().info(f"Корректировка дрона вниз... {z}")
+        elif z < 4.0:
+            cmd.twist.linear.z = 0.1
+            self.get_logger().info(f"Корректировка дрона вверх... {z}")
 
 
-            # Регулируем движение в зависимости от смещения фигуры
-            if abs(delta_x) > tolerance:
-                cmd.twist.linear.y = -0.001 * delta_x  # Поправка по оси Y
-                self.get_logger().info(f'Смещение по Y: {delta_x}')
-            if abs(delta_y) > tolerance:
-                cmd.twist.linear.x = 0.001 * delta_y  # Поправка по оси X
-                self.get_logger().info(f'Смещение по X: {delta_y}')
+        # Регулируем движение в зависимости от смещения фигуры
+        if abs(delta_x) > tolerance:
+            cmd.twist.linear.y = -0.001 * delta_x  # Поправка по оси Y
+            self.get_logger().info(f'Смещение по Y: {delta_x}')
+        if abs(delta_y) > tolerance:
+            cmd.twist.linear.x = 0.001 * delta_y  # Поправка по оси X
+            self.get_logger().info(f'Смещение по X: {delta_y}')
 
-            # Если дрон находится над центром фигуры
-            if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance and self.cube_position == None:
-                self.cube_position = self.drone_position # Висение
-                self.cube_distance = math.sqrt(pow(x, 2) + pow(y, 2))
-                self.get_logger().error(f'Дрон над фигурой, позиция дрона {self.cube_position}, расстояние до куба: {self.cube_distance}')
-        elif self.searched_cube == False:
-            cmd = TwistStamped()
-            cmd.header.stamp = self.get_clock().now().to_msg()
-
-            cmd.twist.linear.y = -0.5
-            x, y, z = self.drone_position
-
-            if z > 2:
-                cmd.twist.linear.z = -0.1
-                self.get_logger().info(f"Корректировка дрона вниз... {z}")
-            elif z < 2:
-                cmd.twist.linear.z = 0.1
-                self.get_logger().info(f"Корректировка дрона вверх... {z}")
+        # Если дрон находится над центром фигуры
+        if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance and self.cube_position == None:
+            self.cube_position = self.drone_position 
+            self.cube_distance = math.sqrt(pow(x, 2) + pow(y, 2))
+            self.get_logger().error(f'Дрон над фигурой, позиция дрона {self.cube_position}, расстояние до куба: {self.cube_distance}')
         
         self.cmd_vel_pub.publish(cmd)
 
