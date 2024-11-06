@@ -14,9 +14,6 @@ import math
 class TestNode(Node):
     def __init__(self):
         super().__init__('test_node')
-        
-        self.target_altitude = 1.0  # Целевая высота зависания над фигурой
-        self.figure_area_threshold = 4000  # Площадь фигуры, при которой дрон останавливается
 
         # Создаем QoS профиль с режимом BEST_EFFORT
         qos_profile = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT, depth=10)
@@ -38,7 +35,7 @@ class TestNode(Node):
         self.drone_position = None  # Для хранения текущей позиции дрона
         self.cube_position = None   # Координаты куба 
         self.cube_distance = None   # Дистанция до куба
-        self.searched_cube = False
+        self.searched_cube = False  # Флаг с сообщением о том, найден ли кубик: false - не найден, true - найден
 
     def take_off(self):
         # Функция для взлета дрона
@@ -93,12 +90,6 @@ class TestNode(Node):
                 self.searched_cube = True
                 self.get_logger().info('Обнаружена цветная фигура')
                 self.get_logger().info(f'Площадь фигуры: {figure_area}')
-
-                # Если фигура достаточно велика (дрон достаточно близко), он останавливается
-                #if figure_area >= self.figure_area_threshold:
-                    #self.get_logger().info('Дрон останавливается над фигурой')
-                    #self.hover_over_figure()
-                    #continue
 
                 # Если фигура еще не достигла нужного размера, корректируем траекторию
                 self.control_drone(figure_center, frame.shape[1] // 2, frame.shape[0] // 2)
