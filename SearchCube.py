@@ -2,25 +2,30 @@ import rclpy
 from rclpy.node import Node
 from mavros_msgs.srv import SetMode
 from geometry_msgs.msg import TwistStamped, PoseStamped
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import cv2
 import time
 import numpy as np
 import threading
+import math
 
 class TestNode(Node):
     def __init__(self):
         super().__init__('test_node')
-
+        
         self.target_altitude = 1.0  # Целевая высота зависания над фигурой
         self.figure_area_threshold = 4000  # Площадь фигуры, при которой дрон останавливается
+
+        # Создаем QoS профиль с режимом BEST_EFFORT
+        qos_profile = QoSProfile(reliability=QoSReliabilityPolicy.BEST_EFFORT, depth=10)
         
         # Инициализация сервисов и подписчиков
         self.set_mode_client = self.create_client(SetMode, '/uav1/mavros/set_mode')
         self.bridge = CvBridge()
         self.camera_sub = self.create_subscription(Image, '/uav1/camera_down', self.camera_callback, 10)
-        self.pose_sub = self.create_subscription(PoseStamped, '/uav1/mavros/local_position/pose', self.pose_callback, 10)
+        self.pose_sub = self.create_subscription(PoseStamped, '/uav1/mavros/local_position/pose', self.pose_callback, qos_profile=qos_profile)
         self.cmd_vel_pub = self.create_publisher(TwistStamped, '/uav1/mavros/setpoint_velocity/cmd_vel', 10)
         self.local_pos_pub = self.create_publisher(PoseStamped, '/uav1/mavros/setpoint_position/local', 10)
 
@@ -31,12 +36,15 @@ class TestNode(Node):
         self.processing_thread.start()
 
         self.drone_position = None  # Для хранения текущей позиции дрона
+        self.cube_position = None   # Координаты куба 
+        self.cube_distance = None   # Дистанция до куба
+        self.searched_cube = False
 
     def take_off(self):
         # Функция для взлета дрона
         self.get_logger().info('Попытка взлета...')
         pose = PoseStamped()
-        pose.pose.position.z = 5.0  # Набор высоты
+        pose.pose.position.z = 2.0  # Набор высоты
         pose.pose.position.x = 0.0
         pose.pose.position.y = 0.0
         pose.header.stamp = self.get_clock().now().to_msg()
@@ -56,6 +64,7 @@ class TestNode(Node):
         # Обновление позиции дрона
         self.drone_position = (pose_msg.pose.position.x, pose_msg.pose.position.y, pose_msg.pose.position.z)
 
+
     def process_frame_thread(self):
         while True:
             if self.frame_queue is None:
@@ -68,6 +77,7 @@ class TestNode(Node):
             figure_detected, figure_center, figure_area = self.detect_figure(frame)
 
             if figure_detected:
+                self.searched_cube = True
                 self.get_logger().info('Обнаружена цветная фигура')
                 self.get_logger().info(f'Площадь фигуры: {figure_area}')
 
@@ -119,27 +129,52 @@ class TestNode(Node):
         return False, (0, 0), 0
 
     def control_drone(self, figure_center, frame_center_x, frame_center_y):
-        # Функция для управления дроном в направлении центра фигуры
-        self.get_logger().info('Корректировка положения дрона...')
-        delta_x = figure_center[0] - frame_center_x
-        delta_y = figure_center[1] - frame_center_y
-        tolerance = 100  # Допустимое отклонение для центрирования
+        if self.searched_cube == True:
+            # Функция для управления дроном в направлении центра фигуры
+            self.get_logger().info('Корректировка положения дрона...')
+            delta_x = figure_center[0] - frame_center_x
+            delta_y = figure_center[1] - frame_center_y
+            tolerance = 50  # Допустимое отклонение для центрирования
 
-        cmd = TwistStamped()
-        cmd.header.stamp = self.get_clock().now().to_msg()
+            cmd = TwistStamped()
+            cmd.header.stamp = self.get_clock().now().to_msg()
+            
+            x, y, z = self.drone_position
 
-        # Регулируем движение в зависимости от смещения фигуры
-        if abs(delta_x) > tolerance:
-            cmd.twist.linear.y = -0.0005 * delta_x  # Поправка по оси Y
-            self.get_logger().info(f'Смещение по Y: {delta_x}')
-        if abs(delta_y) > tolerance:
-            cmd.twist.linear.x = 0.0005 * delta_y  # Поправка по оси X
-            self.get_logger().info(f'Смещение по X: {delta_y}')
+            if z > 2:
+                cmd.twist.linear.z = -0.1
+                self.get_logger().info(f"Корректировка дрона вниз... {z}")
+            elif z < 2:
+                cmd.twist.linear.z = 0.1
+                self.get_logger().info(f"Корректировка дрона вверх... {z}")
 
-        # Если дрон находится над центром фигуры, он начинает спуск/подъём/висение
-        if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance:
-            cmd.twist.linear.z = 0.0  # Висение 
-            self.get_logger().info('Зависаем над фигурой')
+
+            # Регулируем движение в зависимости от смещения фигуры
+            if abs(delta_x) > tolerance:
+                cmd.twist.linear.y = -0.001 * delta_x  # Поправка по оси Y
+                self.get_logger().info(f'Смещение по Y: {delta_x}')
+            if abs(delta_y) > tolerance:
+                cmd.twist.linear.x = 0.001 * delta_y  # Поправка по оси X
+                self.get_logger().info(f'Смещение по X: {delta_y}')
+
+            # Если дрон находится над центром фигуры
+            if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance and self.cube_position == None:
+                self.cube_position = self.drone_position # Висение
+                self.cube_distance = math.sqrt(pow(x, 2) + pow(y, 2))
+                self.get_logger().error(f'Дрон над фигурой, позиция дрона {self.cube_position}, расстояние до куба: {self.cube_distance}')
+        elif self.searched_cube == False:
+            cmd = TwistStamped()
+            cmd.header.stamp = self.get_clock().now().to_msg()
+
+            cmd.twist.linear.y = -0.5
+            x, y, z = self.drone_position
+
+            if z > 2:
+                cmd.twist.linear.z = -0.1
+                self.get_logger().info(f"Корректировка дрона вниз... {z}")
+            elif z < 2:
+                cmd.twist.linear.z = 0.1
+                self.get_logger().info(f"Корректировка дрона вверх... {z}")
         
         self.cmd_vel_pub.publish(cmd)
 
