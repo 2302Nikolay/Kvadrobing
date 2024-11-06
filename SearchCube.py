@@ -54,8 +54,9 @@ class TestNode(Node):
             self.local_pos_pub.publish(pose)
             self.get_clock().sleep_for(rclpy.time.Duration(seconds=0.05))
         self.get_logger().info('Команда на взлет отправлена...')
-
         
+        time.sleep(3)
+
         cmd = TwistStamped()
         cmd.header.stamp = self.get_clock().now().to_msg()
         if self.searched_cube == False:
@@ -105,7 +106,10 @@ class TestNode(Node):
             if self.drone_position is not None:
                 x, y, z = self.drone_position
                 coords_text = f"Drone Position: X={x:.2f}, Y={y:.2f}, Z={z:.2f}"
-                cv2.putText(frame, coords_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+                if self.cube_distance != None:
+                    distance_text = f"Distance: {self.cube_distance:.2f} m. Color: RED"
+                    cv2.putText(frame, distance_text, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+                cv2.putText(frame, coords_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
             else:
                 self.get_logger().warn("Drone position data not available yet.")
 
@@ -145,7 +149,7 @@ class TestNode(Node):
         self.get_logger().info('Корректировка положения дрона...')
         delta_x = figure_center[0] - frame_center_x
         delta_y = figure_center[1] - frame_center_y
-        tolerance = 50  # Допустимое отклонение для центрирования
+        tolerance = 10  # Допустимое отклонение для центрирования
 
         cmd = TwistStamped()
         cmd.header.stamp = self.get_clock().now().to_msg()
@@ -165,13 +169,14 @@ class TestNode(Node):
             cmd.twist.linear.y = -0.001 * delta_x  # Поправка по оси Y
             self.get_logger().info(f'Смещение по Y: {delta_x}')
         if abs(delta_y) > tolerance:
-            cmd.twist.linear.x = 0.001 * delta_y  # Поправка по оси X
+            cmd.twist.linear.x = -0.001 * delta_y  # Поправка по оси X
             self.get_logger().info(f'Смещение по X: {delta_y}')
 
         # Если дрон находится над центром фигуры
         if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance and self.cube_position == None:
             self.cube_position = self.drone_position 
             self.cube_distance = math.sqrt(pow(x, 2) + pow(y, 2))
+            self.searched_cube = False
             self.get_logger().error(f'Дрон над фигурой, позиция дрона {self.cube_position}, расстояние до куба: {self.cube_distance}')
         
         self.cmd_vel_pub.publish(cmd)
@@ -204,7 +209,7 @@ def main(args=None):
     rclpy.init(args=args)
     node = TestNode()
     node.take_off()
-    time.sleep(5) # чтобы немного подождал после взлета
+    time.sleep(7) # чтобы немного подождал после взлета
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
