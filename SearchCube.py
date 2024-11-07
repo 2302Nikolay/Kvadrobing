@@ -33,9 +33,11 @@ class TestNode(Node):
         self.processing_thread.start()
 
         self.drone_position = None  # Для хранения текущей позиции дрона
-        self.cube_position = None   # Координаты куба 
-        self.cube_distance = None   # Дистанция до куба
-        self.searched_cube = False  # Флаг с сообщением о том, найден ли кубик: false - не найден, true - найден
+        self.cube_position = None   # Координаты текущего найденного куба 
+        self.cube_distance = None   # Дистанция до текущего куба
+        self.searched_cube = False  # Флаг поиска: False - в поиске, True - найден и стабилизирован
+        self.figure_detected = False
+        self.found_cubes = 0  # Счетчик найденных кубов
 
     def take_off(self):
         # Функция для взлета дрона
@@ -56,14 +58,13 @@ class TestNode(Node):
 
         cmd = TwistStamped()
         cmd.header.stamp = self.get_clock().now().to_msg()
-        if self.searched_cube == False:
+        if not self.searched_cube:
             cmd.twist.linear.y = 0.5
             self.get_logger().info("Режим блуждание")
         else:
             self.get_logger().info("НЕ режим блуждания...")
             cmd.twist.linear.y = 0.0
         self.cmd_vel_pub.publish(cmd)
-
 
     def camera_callback(self, image_msg):
         # Обработка входящих изображений от камеры
@@ -74,7 +75,6 @@ class TestNode(Node):
         # Обновление позиции дрона
         self.drone_position = (pose_msg.pose.position.x, pose_msg.pose.position.y, pose_msg.pose.position.z)
 
-
     def process_frame_thread(self):
         while True:
             if self.frame_queue is None:
@@ -84,26 +84,26 @@ class TestNode(Node):
             self.frame_queue = None  # Очищаем очередь после обработки
 
             # Обнаружение цветной фигуры на изображении
-            figure_detected, figure_center, figure_area = self.detect_figure(frame)
+            self.figure_detected, figure_center, figure_area = self.detect_figure(frame)
 
-            if figure_detected:
-                self.searched_cube = True
-                self.get_logger().info('Обнаружена цветная фигура')
-                self.get_logger().info(f'Площадь фигуры: {figure_area}')
+            if self.figure_detected:
+                if not self.searched_cube:
+                    # Если это первый раз, когда обнаружен новый куб
+                    self.searched_cube = True
+                    self.get_logger().info('Обнаружена цветная фигура')
 
-                # Если фигура еще не достигла нужного размера, корректируем траекторию
+                # Корректируем траекторию для центрирования на кубе
                 self.control_drone(figure_center, frame.shape[1] // 2, frame.shape[0] // 2)
 
             if self.drone_position is not None:
                 x, y, z = self.drone_position
                 coords_text = f"Drone Position: X={x:.2f}, Y={y:.2f}, Z={z:.2f}"
-                if self.cube_distance != None:
+                if self.cube_distance is not None:
                     distance_text = f"Distance: {self.cube_distance:.2f} m. Color: RED"
                     cv2.putText(frame, distance_text, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
                 cv2.putText(frame, coords_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
             else:
                 self.get_logger().warn("Drone position data not available yet.")
-
 
             # Показываем обновленное изображение
             cv2.imshow("Drone Camera Down", frame)
@@ -113,7 +113,7 @@ class TestNode(Node):
         # Обнаружение фигуры определенного цвета на изображении
         hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # Настройки для поиска красного цвета (измените под нужный цвет фигуры)
+        # Настройки для поиска красного цвета
         lower_red = np.array([0, 74, 50], dtype=np.uint8)
         upper_red = np.array([3, 255, 255], dtype=np.uint8)
         mask = cv2.inRange(hsv_frame, lower_red, upper_red)
@@ -137,77 +137,56 @@ class TestNode(Node):
 
     def control_drone(self, figure_center, frame_center_x, frame_center_y):
         # Функция для управления дроном в направлении центра фигуры
-        self.get_logger().info('Корректировка положения дрона...')
         delta_x = figure_center[0] - frame_center_x
         delta_y = figure_center[1] - frame_center_y
-        tolerance = 10  # Допустимое отклонение для центрирования
+        tolerance = 5  # Допустимое отклонение для центрирования
 
         cmd = TwistStamped()
         cmd.header.stamp = self.get_clock().now().to_msg()
         
+        # Проверяем текущее положение по высоте
         x, y, z = self.drone_position
 
         if z > 4.0:
-            cmd.twist.linear.z = -0.1
+            cmd.twist.linear.z = -0.05  # Уменьшенная скорость корректировки по оси Z
             self.get_logger().info(f"Корректировка дрона вниз... {z}")
         elif z < 4.0:
-            cmd.twist.linear.z = 0.1
+            cmd.twist.linear.z = 0.05
             self.get_logger().info(f"Корректировка дрона вверх... {z}")
 
-
-        # Регулируем движение в зависимости от смещения фигуры
+        # Настроим плавное движение по осям X и Y для предотвращения "болтанки"
         if abs(delta_x) > tolerance:
-            cmd.twist.linear.y = -0.001 * delta_x  # Поправка по оси Y
+            cmd.twist.linear.y = -0.003 * delta_x  # Уменьшенный коэффициент для более плавного движения по Y
             self.get_logger().info(f'Смещение по Y: {delta_x}')
         if abs(delta_y) > tolerance:
-            cmd.twist.linear.x = -0.001 * delta_y  # Поправка по оси X
+            cmd.twist.linear.x = -0.003 * delta_y  # Уменьшенный коэффициент для более плавного движения по X
             self.get_logger().info(f'Смещение по X: {delta_y}')
 
-        # Если дрон находится над центром фигуры
-        if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance and self.cube_position == None:
+        # Если дрон находится над центром фигуры и еще не находил этот куб
+        if abs(delta_x) <= tolerance and abs(delta_y) <= tolerance and self.cube_position is None:
             self.cube_position = self.drone_position 
             self.cube_distance = math.sqrt(pow(x, 2) + pow(y, 2))
+            self.searched_cube = True
+            self.found_cubes += 1
+            self.get_logger().info(f'Куб найден: позиция {self.cube_position}, расстояние до куба: {self.cube_distance}')
+
+        # После обнаружения и стабилизации, двигаемся к следующему кубу
+        if self.searched_cube and self.found_cubes > 0:
+            self.cube_position = None
             self.searched_cube = False
-            self.get_logger().error(f'Дрон над фигурой, позиция дрона {self.cube_position}, расстояние до куба: {self.cube_distance}')
-        
+            cmd.twist.linear.x = 0.2  # Начинаем медленно двигаться к следующему кубу
+            cmd.twist.linear.y = -0.2
+
+        # Публикуем команду управления
         self.cmd_vel_pub.publish(cmd)
-
-    def hover_over_figure(self):
-        # Остановка дрона над центром фигуры
-        stop_cmd = TwistStamped()
-        stop_cmd.header.stamp = self.get_clock().now().to_msg()
-        stop_cmd.twist.linear.x = 0.0
-        stop_cmd.twist.linear.y = 0.0
-        stop_cmd.twist.linear.z = 0.0
-        self.cmd_vel_pub.publish(stop_cmd)
-
-    def land(self):
-        # Функция для посадки дрона
-        self.get_logger().info('Посадка...')
-        if self.set_mode_client.wait_for_service(timeout_sec=5.0):
-            set_mode_req = SetMode.Request()
-            set_mode_req.custom_mode = 'AUTO.LAND'
-            future = self.set_mode_client.call_async(set_mode_req)
-            rclpy.spin_until_future_complete(self, future)
-            if future.result() and future.result().mode_sent:
-                self.get_logger().info('Режим посадки установлен')
-            else:
-                self.get_logger().error('Не удалось установить режим посадки')
-        else:
-            self.get_logger().error('Сервис установки режима недоступен')
 
 def main(args=None):
     rclpy.init(args=args)
     node = TestNode()
     node.take_off()
-    time.sleep(7) # чтобы немного подождал после взлета
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
