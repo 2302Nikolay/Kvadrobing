@@ -99,7 +99,7 @@ class TestNode(Node):
                 x, y, z = self.drone_position
                 coords_text = f"Drone Position: X={x:.2f}, Y={y:.2f}, Z={z:.2f}"
                 if self.cube_distance is not None:
-                    distance_text = f"Distance: {self.cube_distance:.2f} m. Color: RED"
+                    distance_text = f"Distance: {self.cube_distance:.2f} m. Color: YELLOW"
                     cv2.putText(frame, distance_text, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
                 cv2.putText(frame, coords_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
             else:
@@ -114,8 +114,8 @@ class TestNode(Node):
         hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         # Настройки для поиска красного цвета
-        lower_red = np.array([0, 74, 50], dtype=np.uint8)
-        upper_red = np.array([3, 255, 255], dtype=np.uint8)
+        lower_red = np.array([28, 74, 50], dtype=np.uint8)
+        upper_red = np.array([32, 255, 255], dtype=np.uint8)
         mask = cv2.inRange(hsv_frame, lower_red, upper_red)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -174,10 +174,30 @@ class TestNode(Node):
         if self.searched_cube and self.found_cubes > 0:
             self.cube_position = None
             self.searched_cube = False
-            cmd.twist.linear.x = 0.2  # Начинаем медленно двигаться к следующему кубу
-            cmd.twist.linear.y = -0.2
+            cmd.twist.linear.x = 0.0  # Начинаем медленно двигаться к следующему кубу
+            cmd.twist.linear.y = -0.1
+            if x > 0:
+                cmd.twist.linear.x = -0.2
+            elif x < 0:
+                cmd.twist.linear.x = 0.2
+            if y > 0:
+                cmd.twist.linear.y = -0.2
+            elif y < 0:
+                cmd.twist.linear.y = 0.2
+            if x == 0.0 and y == 0.0:
+                self.get_logger().log("Посадка...")
+                self.land()
+                return
 
         # Публикуем команду управления
+        self.cmd_vel_pub.publish(cmd)
+
+    def land(self):
+        cmd = TwistStamped()
+        cmd.twist.linear.z = -1
+        cmd.twist.linear.x = 0.0
+        cmd.twist.linear.y = 0.0
+
         self.cmd_vel_pub.publish(cmd)
 
 def main(args=None):
